@@ -22,9 +22,11 @@ const chartData = [
 
 const Issuer = () => {
   const { projects, addProject, walletAddress } = useApp();
-  const [minting, setMinting] = useState(false);
+  const [minting, setMinting] = useState<false | "creating" | "approving">(false);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [pdfName, setPdfName] = useState<string | null>(null);
+  const [projectType, setProjectType] = useState<ProjectType | "">("");
+  const [country, setCountry] = useState("");
 
   const myProjects = projects.filter(p => p.issuerAddress === walletAddress);
   const totalIssued = myProjects.reduce((s, p) => s + p.tokensMinted, 0) || projects.reduce((s, p) => s + p.tokensMinted, 0);
@@ -34,26 +36,32 @@ const Issuer = () => {
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (!projectType || !country) return;
     const fd = new FormData(e.currentTarget);
-    setMinting(true);
+    setMinting("creating");
     try {
-      const txHash = await addProject({
-        name: fd.get("name") as string,
-        type: fd.get("type") as ProjectType,
-        country: fd.get("country") as string,
-        countryFlag: "",
-        description: fd.get("description") as string,
-        tokensMinted: Number(fd.get("tokens")),
-        pricePerToken: Number(fd.get("price")),
-        coordinates: "0° N, 0° W",
-        photoUrl: photoPreview || undefined,
-        pdfName: pdfName || undefined,
-        satelliteUrl: (fd.get("satellite") as string) || undefined,
-      });
-      toast.success("Tokens minted successfully!", { description: `TX: ${txHash.slice(0, 18)}...` });
+      const txHash = await addProject(
+        {
+          name: fd.get("name") as string,
+          type: projectType as ProjectType,
+          country,
+          countryFlag: "",
+          description: fd.get("description") as string,
+          tokensMinted: Number(fd.get("tokens")),
+          pricePerToken: Number(fd.get("price")),
+          coordinates: "0° N, 0° W",
+          photoUrl: photoPreview || undefined,
+          pdfName: pdfName || undefined,
+          satelliteUrl: (fd.get("satellite") as string) || undefined,
+        },
+        () => setMinting("approving"),
+      );
+      toast.success("Project created & marketplace approved!", { description: `TX: ${txHash.slice(0, 18)}...` });
       e.currentTarget.reset();
       setPhotoPreview(null);
       setPdfName(null);
+      setProjectType("");
+      setCountry("");
     } catch {
       toast.error("Minting failed");
     }
@@ -88,11 +96,11 @@ const Issuer = () => {
             <h2 className="font-semibold mb-4">Mint New Carbon Credits</h2>
             <form onSubmit={handleSubmit} className="space-y-3">
               <Input name="name" placeholder="Project name" required />
-              <Select name="type" required>
+              <Select value={projectType} onValueChange={(v) => setProjectType(v as ProjectType)} required>
                 <SelectTrigger><SelectValue placeholder="Project type" /></SelectTrigger>
                 <SelectContent>{PROJECT_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
               </Select>
-              <Select name="country" required>
+              <Select value={country} onValueChange={setCountry} required>
                 <SelectTrigger><SelectValue placeholder="Country" /></SelectTrigger>
                 <SelectContent>{COUNTRIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
               </Select>
@@ -117,8 +125,10 @@ const Issuer = () => {
                 <Input name="satellite" placeholder="https://..." />
               </div>
 
-              <Button type="submit" disabled={minting} className="w-full bg-primary text-primary-foreground hover:bg-primary/90">
-                {minting ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Minting...</> : <><CheckCircle className="w-4 h-4 mr-2" />Mint Tokens</>}
+              <Button type="submit" disabled={!!minting} className="w-full bg-primary text-primary-foreground hover:bg-primary/90">
+                {minting === "creating" && <><Loader2 className="w-4 h-4 animate-spin mr-2" />Creating project... (1/2)</>}
+                {minting === "approving" && <><Loader2 className="w-4 h-4 animate-spin mr-2" />Approving marketplace... (2/2)</>}
+                {!minting && <><CheckCircle className="w-4 h-4 mr-2" />Mint Tokens</>}
               </Button>
             </form>
           </div>

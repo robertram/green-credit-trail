@@ -55,7 +55,13 @@ const Marketplace = () => {
     setBuying(true);
     try {
       const txHash = await buyTokens(buyModal.id, buyAmount);
-      toast.success("Purchase successful!", { description: `TX: ${txHash.slice(0, 18)}...` });
+      toast.success("Purchase successful!", {
+        description: txHash,
+        action: {
+          label: "View on Snowtrace",
+          onClick: () => window.open(`https://testnet.snowtrace.io/tx/${txHash}`, "_blank"),
+        },
+      });
       setBuyModal(null);
       setBuyAmount(1);
     } catch { toast.error("Purchase failed"); }

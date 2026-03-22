@@ -8,8 +8,8 @@ import {
   usePublicClient,
 } from "wagmi";
 import { useConnectModal } from "@rainbow-me/rainbowkit";
-import { parseEther, formatEther, parseAbiItem } from "viem";
-import { MARKETPLACE_ADDRESS, MARKETPLACE_ABI, CARBON_TOKEN_ABI } from "@/lib/contracts";
+import { parseEther, formatEther, parseAbiItem, decodeEventLog } from "viem";
+import { MARKETPLACE_ADDRESS, MARKETPLACE_ABI, CARBON_TOKEN_ABI, DEPLOY_BLOCK } from "@/lib/contracts";
 import { encodeMetadata, decodeMetadata } from "@/lib/metadata";
 
 export type ProjectType = "Reforestation" | "Solar Energy" | "Wind Energy" | "Mangrove" | "Other";
@@ -66,6 +66,7 @@ const generateTxHash = () => {
 const truncateAddress = (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`;
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+const CHUNK = 2048n; // Fuji RPC max block range per eth_getLogs request
 
 interface AppContextType {
   walletConnected: boolean;
@@ -73,7 +74,7 @@ interface AppContextType {
   connectWallet: () => Promise<void>;
   disconnectWallet: () => void;
   projects: CarbonProject[];
-  addProject: (p: Omit<CarbonProject, "id" | "tokensSold" | "status" | "dateIssued" | "issuerAddress">) => Promise<string>;
+  addProject: (p: Omit<CarbonProject, "id" | "tokensSold" | "status" | "dateIssued" | "issuerAddress">, onApproving?: () => void) => Promise<string>;
   purchases: Purchase[];
   buyTokens: (projectId: string, amount: number) => Promise<string>;
   getProject: (id: string) => CarbonProject | undefined;
@@ -83,6 +84,22 @@ interface AppContextType {
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
+
+async function getLogsPaginated(
+  client: ReturnType<typeof usePublicClient>,
+  params: Parameters<NonNullable<ReturnType<typeof usePublicClient>>["getLogs"]>[0] & {
+    fromBlock: bigint;
+  },
+) {
+  const toBlock = await client!.getBlockNumber();
+  const results: Awaited<ReturnType<NonNullable<ReturnType<typeof usePublicClient>>["getLogs"]>> = [];
+  for (let from = params.fromBlock; from <= toBlock; from += CHUNK) {
+    const to = from + CHUNK - 1n < toBlock ? from + CHUNK - 1n : toBlock;
+    const chunk = await client!.getLogs({ ...params, fromBlock: from, toBlock: to });
+    results.push(...chunk);
+  }
+  return results;
+}
 
 export const AppProvider = ({ children }: { children: ReactNode }) => {
   const { address, isConnected } = useAccount();
@@ -95,13 +112,17 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
   const contractEnabled = MARKETPLACE_ADDRESS !== "0x";
 
+  console.log('[contracts] address:', MARKETPLACE_ADDRESS, '| enabled:', contractEnabled)
+
   // ── Read all project addresses ──────────────────────────────────────────────
-  const { data: projectAddresses } = useReadContract({
+  const { data: projectAddresses, status, error } = useReadContract({
     address: MARKETPLACE_ADDRESS,
     abi: MARKETPLACE_ABI,
     functionName: "getAllProjects",
     query: { enabled: contractEnabled },
   });
+
+  console.log('[getAllProjects] status:', status, '| data:', projectAddresses, '| error:', error)
 
   // ── Batch read project details ──────────────────────────────────────────────
   const detailsContracts = useMemo(
@@ -223,6 +244,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
   const addProject = async (
     p: Omit<CarbonProject, "id" | "tokensSold" | "status" | "dateIssued" | "issuerAddress">,
+    onApproving?: () => void,
   ) => {
     const metadata = encodeMetadata({
       description: p.description,
@@ -239,7 +261,9 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         .substring(0, 6)
         .toUpperCase() || "CCT";
     const priceWei = parseEther(p.pricePerToken.toString());
-    const txHash = await writeContractAsync({
+
+    // Step 1 — deploy the CarbonToken via the marketplace
+    const createHash = await writeContractAsync({
       address: MARKETPLACE_ADDRESS,
       abi: MARKETPLACE_ABI,
       functionName: "createProject",
@@ -254,7 +278,41 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         BigInt(p.tokensMinted),
       ],
     });
-    return txHash;
+
+    // Wait for the receipt so we can extract the deployed token address
+    // from the ProjectCreated event log
+    const receipt = await publicClient!.waitForTransactionReceipt({ hash: createHash });
+
+    let tokenAddress: `0x${string}` | undefined;
+    for (const log of receipt.logs) {
+      try {
+        const decoded = decodeEventLog({
+          abi: MARKETPLACE_ABI,
+          eventName: "ProjectCreated",
+          topics: log.topics,
+          data: log.data,
+        });
+        tokenAddress = (decoded.args as { tokenContract: `0x${string}` }).tokenContract;
+        break;
+      } catch {
+        // not the ProjectCreated log, skip
+      }
+    }
+
+    if (!tokenAddress) throw new Error("Could not find deployed token address in receipt");
+
+    // Signal to the caller that we're moving to the approve step
+    onApproving?.();
+
+    // Step 2 — approve the marketplace to transfer the issuer's tokens to buyers
+    await writeContractAsync({
+      address: tokenAddress,
+      abi: CARBON_TOKEN_ABI,
+      functionName: "approve",
+      args: [MARKETPLACE_ADDRESS, BigInt(p.tokensMinted)],
+    });
+
+    return createHash;
   };
 
   // ── Purchases: load history + watch new ────────────────────────────────────
@@ -264,13 +322,13 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     if (!publicClient || !address || !contractEnabled) return;
     const load = async () => {
       try {
-        const logs = await publicClient.getLogs({
+        const logs = await getLogsPaginated(publicClient, {
           address: MARKETPLACE_ADDRESS,
           event: parseAbiItem(
             "event TokensPurchased(address indexed buyer, address indexed project, uint256 amount, uint256 avaxPaid, uint256 timestamp)",
           ),
           args: { buyer: address },
-          fromBlock: 0n,
+          fromBlock: DEPLOY_BLOCK,
         });
         const historical: Purchase[] = logs.map((log) => {
           const projectAddr = (log.args.project ?? ZERO_ADDRESS) as string;
@@ -337,12 +395,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const getTransactions = async (projectId: string): Promise<Transaction[]> => {
     if (!publicClient || !projectId || !projectId.startsWith("0x")) return [];
     try {
-      const logs = await publicClient.getLogs({
+      const logs = await getLogsPaginated(publicClient, {
         address: projectId as `0x${string}`,
         event: parseAbiItem(
           "event Transfer(address indexed from, address indexed to, uint256 value)",
         ),
-        fromBlock: 0n,
+        fromBlock: DEPLOY_BLOCK,
       });
       return logs.map((log) => {
         const from = (log.args.from ?? ZERO_ADDRESS) as string;
