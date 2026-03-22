@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run:*)",
+      "Bash(npm install:*)",
+      "Bash(npx hardhat:*)",
+      "Bash(TS_NODE_PROJECT=tsconfig.hardhat.json npx hardhat compile 2>&1)",
+      "Bash(npm uninstall:*)",
+      "Bash(./node_modules/.bin/hardhat compile:*)",
+      "Bash(node_modules/.bin/hardhat compile:*)",
+      "Bash(node_modules/.bin/hardhat test:*)"
+    ]
+  }
+}

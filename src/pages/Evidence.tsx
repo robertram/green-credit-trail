@@ -1,5 +1,6 @@
+import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
-import { useApp } from "@/context/AppContext";
+import { useApp, Transaction } from "@/context/AppContext";
 import { StatusBadge } from "@/components/StatusBadge";
 import { StatCard } from "@/components/StatCard";
 import { Button } from "@/components/ui/button";
@@ -20,7 +21,10 @@ const Evidence = () => {
     );
   }
 
-  const transactions = getTransactions(project.id);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  useEffect(() => {
+    getTransactions(project.id).then(setTransactions).catch(() => {});
+  }, [project.id]);
   const available = project.tokensMinted - project.tokensSold;
   const treesEquiv = project.tokensMinted * 45;
   const carsEquiv = Math.round(project.tokensMinted / 4.6);

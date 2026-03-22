@@ -1,8 +1,7 @@
-import { Leaf, ShoppingCart, Shield, Home, Wallet, LogOut, Loader2 } from "lucide-react";
+import { Leaf, ShoppingCart, Shield, Home, Wallet, LogOut } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
-import { useState } from "react";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
   SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarFooter, useSidebar,
@@ -20,13 +19,6 @@ export function AppSidebar() {
   const collapsed = state === "collapsed";
   const location = useLocation();
   const { walletConnected, walletAddress, connectWallet, disconnectWallet, truncateAddress } = useApp();
-  const [connecting, setConnecting] = useState(false);
-
-  const handleConnect = async () => {
-    setConnecting(true);
-    await connectWallet();
-    setConnecting(false);
-  };
 
   return (
     <Sidebar collapsible="icon" className="border-r-0">
@@ -80,9 +72,9 @@ export function AppSidebar() {
             </Button>
           </div>
         ) : (
-          <Button onClick={handleConnect} disabled={connecting} size="sm" className="w-full bg-sidebar-primary text-sidebar-primary-foreground hover:bg-sidebar-primary/90">
-            {connecting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Wallet className="h-4 w-4 mr-2" />}
-            {!collapsed && (connecting ? "Connecting..." : "Connect Wallet")}
+          <Button onClick={connectWallet} size="sm" className="w-full bg-sidebar-primary text-sidebar-primary-foreground hover:bg-sidebar-primary/90">
+            <Wallet className="h-4 w-4 mr-2" />
+            {!collapsed && "Connect Wallet"}
           </Button>
         )}
       </SidebarFooter>
