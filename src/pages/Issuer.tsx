@@ -78,7 +78,7 @@ const Issuer = () => {
   };
 
   return (
-    <WalletGuard>
+    <div>
       <div className="p-6 max-w-6xl mx-auto space-y-6">
         <h1 className="text-2xl font-bold">Issuer Dashboard</h1>
 
@@ -181,7 +181,7 @@ const Issuer = () => {
           </div>
         </div>
       </div>
-    </WalletGuard>
+    </div>
   );
 };
 
